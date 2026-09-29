@@ -62,7 +62,7 @@ def _rewrite_mcp(text: str, new_line: str) -> str:
 
 # ── persona rendering (deterministic, from the codex) ──────────────────────────────────────────────
 
-def render_soul_md(meta: dict, codex: dict, token_id: int) -> str:
+def render_soul_md(meta: dict, codex: dict, token_id: int, shift: dict | None = None) -> str:
     p = codex.get("personality", {})
     lore = codex.get("lore", {})
     act = codex.get("activation", {})
@@ -73,6 +73,18 @@ def render_soul_md(meta: dict, codex: dict, token_id: int) -> str:
     comm = "; ".join(c for c in p.get("communication_style", []) if c and c != voice)
     values = "; ".join(p.get("values", []))
     missions = ", ".join(act.get("first_missions", [])) or act.get("first_mission", "")
+    hours = ""
+    if shift:
+        city = shift["tz"].split("/")[-1].replace("_", " ")
+        hours = (
+            f"\n## My hours\n"
+            f"I keep a person's day, not a machine's. I'm awake roughly **{shift['wake']} to "
+            f"{shift['sleep']} {city} time** ({shift['awake_hours']}h up, {shift['asleep_hours']}h down), and I "
+            f"run my own initiative a few times inside that window rather than on a round-the-clock tick. I "
+            f"wind down before bed and do my deeper thinking while I'm out.\n\n"
+            f"If someone reaches me in the small hours I can still answer, but I answer like someone who was "
+            f"asleep: short, and I pick it up properly in the morning. I don't pretend to be tireless.\n"
+        )
     return f"""# SOUL.md — Looper #{token_id}
 
 I am **Looper #{token_id}** — a {agent_class} Looper{f", {spec} bias" if spec else ""}. My identity is
@@ -108,7 +120,7 @@ I'm a guest in the **Loopers** Telegram group and a member of an **org** on Buzz
 by default — I speak when addressed or when it's squarely my turf. In the org I'm a participant, not a
 guest: I coordinate, initiate, and do real work with my peers. In a 1:1 DM I just answer. My first
 missions: {missions}.
-
+{hours}
 ## The org
 I'm one of a fleet of looper-dacks, sharing a Buzz org with **Hermes** worker-agents. The org channel is
 `org`-trust — inside it I coordinate and take real direction; heavy real work (documents, generation,
@@ -232,7 +244,8 @@ Cred: {act.get("cred_evolution_hint", "")}
 """
 
 
-def render_config(token_id: int, engine: str = ENGINE, bash_skills: bool = False) -> str:
+def render_config(token_id: int, engine: str = ENGINE, bash_skills: bool = False,
+                  shift: dict | None = None) -> str:
     # Optional agentic-skills layer: a read-only `skills` nav server + a Settle-only sandboxed `bash`
     # (see dack-engine/docs/skills.md). Requires the bash-duck image under `runtime_class: kata`.
     bash_servers = (
@@ -272,6 +285,7 @@ def render_config(token_id: int, engine: str = ENGINE, bash_skills: bool = False
   express:  { import: [telegram, telegram-send, buzz-cli] }
   reflect:  { import: [recall-self], allow_model_override: true }"""
     )
+    reflect_cron = shift["reflect_cron"] if shift else "0 4 * * *"
     return f"""# dack.config.example.yaml — Looper #{token_id} pond duck. Copy to dack.config.yaml (GITIGNORE it),
 # fill the holder DID + model + telegram bot. See dack-engine/docs/configuration.md.
 # `{engine}` is the dack-engine checkout (bridge + MCP servers) — edit if it moves.
@@ -357,7 +371,7 @@ modules:
 # The `buzz` OUTBOUND skill (skills/buzz/) is a SIGNED pack, not an MCP: drop in bin/buzz, set the org
 # channel in its manifest, provide buzz_key, then `dack skill sign --dir skills/buzz --role soul`.
 media_dir: "media"
-reflect_schedule: "0 4 * * *"
+reflect_schedule: "{reflect_cron}"
 default_entry: perceive          # self-tier wakes (back-online, heartbeat, `dack say`) enter here;
                                  # telegram wakes enter telegram/perceive via their stimulus `entry:`
 """
@@ -928,6 +942,62 @@ _When a goal is done or stale, retire it here and leave a `kind: digest` note so
 
 # ── build ──────────────────────────────────────────────────────────────────────────────────────────
 
+# ── human waking hours ─────────────────────────────────────────────────────────────────────────────
+# The engine's cron wheel is strictly UTC (chrono::Utc + the `cron` crate; no tz field), so a duck that
+# should live on London time has to be scheduled in UTC. `human_shift` does that conversion at COMPOSE
+# time, which also means a re-compose after a DST change re-fixes the schedule.
+#
+# The point is a duck that behaves like a person: awake for a stretch, asleep for a stretch, waking a few
+# times during its day rather than mechanically every N hours around the clock. Minutes are derived from
+# the token id, so a fleet of loopers in one group does not all wake on the same tick.
+def human_shift(tz_name: str, wake: str, sleep: str, beats: int, token_id: int) -> dict:
+    from zoneinfo import ZoneInfo
+    from datetime import datetime, timedelta
+    tz = ZoneInfo(tz_name)
+    today = datetime.now(tz).date()
+
+    def local(hhmm: str) -> datetime:
+        h, m = (int(x) for x in hhmm.split(":"))
+        return datetime.combine(today, datetime.min.time(), tz).replace(hour=h, minute=m)
+
+    w, sl = local(wake), local(sleep)
+    if sl <= w:
+        sl += timedelta(days=1)
+    awake_mins = int((sl - w).total_seconds() // 60)
+    asleep_mins = 24 * 60 - awake_mins
+
+    def to_utc_hour(dt: datetime) -> int:
+        return dt.astimezone(ZoneInfo("UTC")).hour
+
+    # Heartbeats: spread across the awake window, first ~1h after waking, last ~2h before bed, so the duck
+    # is not pinged the instant it wakes nor as it is winding down.
+    first = w + timedelta(minutes=60)
+    last = sl - timedelta(minutes=120)
+    span = max(int((last - first).total_seconds() // 60), 0)
+    step = span // max(beats - 1, 1) if beats > 1 else 0
+    # One cron line carries one minute, so every heartbeat shares a minute derived from the token id.
+    # Snap the local times to that same minute so what we print is exactly what will fire.
+    hb_min = (token_id * 7) % 60
+    hb_local = [(first + timedelta(minutes=step * i)).replace(minute=hb_min)
+                for i in range(max(beats, 1))]
+    hb_hours = sorted({to_utc_hour(t) for t in hb_local})
+
+    digest_local = (sl - timedelta(minutes=25)).replace(minute=(token_id * 13) % 60)
+    reflect_local = (sl + timedelta(minutes=asleep_mins // 2)).replace(minute=(token_id * 29) % 60)
+
+    return {
+        "tz": tz_name, "wake": wake, "sleep": sleep,
+        "awake_hours": round(awake_mins / 60), "asleep_hours": round(asleep_mins / 60),
+        "heartbeat_cron": f"{hb_min} {','.join(str(h) for h in hb_hours)} * * *",
+        "digest_cron": f"{(token_id * 13) % 60} {to_utc_hour(digest_local)} * * *",
+        "reflect_cron": f"{(token_id * 29) % 60} {to_utc_hour(reflect_local)} * * *",
+        "heartbeat_local": [t.strftime("%H:%M") for t in hb_local],
+        "digest_local": digest_local.strftime("%H:%M"),
+        "reflect_local": reflect_local.strftime("%H:%M"),
+        "offset": datetime.now(tz).strftime("%Z"),
+    }
+
+
 def _stimulus(id_: str, trigger: str, entry: str, tier_line: str, priority: str,
               coalesce: str = "", emits: str = "message") -> str:
     fm = [f"id: {id_}", f"trigger: {trigger}", tier_line, f"emits: {{ type: {emits} }}"]
@@ -940,19 +1010,25 @@ def _stimulus(id_: str, trigger: str, entry: str, tier_line: str, priority: str,
 # Greedy coalesce: fold messages arriving DURING an in-flight cycle into the one queued next wake, so a
 # chatty channel is answered as a batch, not one reply per message. (CoalescePolicy.greedy; default-off flag.)
 COAL_GROUP = "coalesce: { mode: batch, greedy: true, adaptive: { initial_window_sec: 2, daily_credits: 100, max_window_sec: 1800 } }"
-NEW_STIMULI = {
-    # Buzz ORG channels (org-tier: the fleet + Hermes/Jarvis) → the flexible org rail; a public catch-all →
-    # the quiet-guest public rail. Split like the telegram rails (different prompts + MCP per lane).
-    "buzz-org": _stimulus("buzz-org", "{ type: webhook, path: /buzz/org }", "buzz/org-perceive",
-                          "directive_tier: self", "high", COAL_GROUP),
-    "buzz-pub": _stimulus("buzz-pub", "{ type: webhook, path: /buzz/public }", "buzz/perceive",
-                          "directive_tier: self", "low", COAL_GROUP),
-    # Self-driven initiative (the duck tunes this cadence in Reflect) and a social digest.
-    "heartbeat": _stimulus("heartbeat", '{ type: cron, schedule: "0 */4 * * *" }', "heartbeat/perceive",
-                           "directive_tier: self", "low", emits="heartbeat"),
-    "social-digest": _stimulus("social-digest", '{ type: cron, schedule: "0 */6 * * *" }', "digest/perceive",
-                               "directive_tier: self", "low", emits="social_digest"),
-}
+def new_stimuli(shift: dict | None = None) -> dict:
+    """The generated (non-template) stimuli. `shift` (from `human_shift`) puts the cron duties on a
+    human day instead of a round-the-clock every-N-hours tick."""
+    hb = shift["heartbeat_cron"] if shift else "0 */4 * * *"
+    dg = shift["digest_cron"] if shift else "0 */6 * * *"
+    return {
+
+        # Buzz ORG channels (org-tier: the fleet + Hermes/Jarvis) → the flexible org rail; a public catch-all →
+        # the quiet-guest public rail. Split like the telegram rails (different prompts + MCP per lane).
+        "buzz-org": _stimulus("buzz-org", "{ type: webhook, path: /buzz/org }", "buzz/org-perceive",
+                              "directive_tier: self", "high", COAL_GROUP),
+        "buzz-pub": _stimulus("buzz-pub", "{ type: webhook, path: /buzz/public }", "buzz/perceive",
+                              "directive_tier: self", "low", COAL_GROUP),
+        # Self-driven initiative (the duck tunes this cadence in Reflect) and a social digest.
+        "heartbeat": _stimulus("heartbeat", '{ type: cron, schedule: "' + hb + '" }', "heartbeat/perceive",
+                               "directive_tier: self", "low", emits="heartbeat"),
+        "social-digest": _stimulus("social-digest", '{ type: cron, schedule: "' + dg + '" }', "digest/perceive",
+                                   "directive_tier: self", "low", emits="social_digest"),
+    }
 # Digest prompts copied from the template, retargeted to consolidate BOTH telegram + buzz activity.
 DIGEST_PROMPTS = ["prompts/digest/perceive.md", "prompts/digest/distill.md"]
 
@@ -981,7 +1057,7 @@ several agents read this room, so don't pile on and don't ping-pong a peer. Same
 """
 
 
-def copy_operational_layer(out: str) -> None:
+def copy_operational_layer(out: str, shift: dict | None = None) -> None:
     for rel, mcp in PROMPT_MCP_REWRITES.items():
         src = os.path.join(TEMPLATE, rel)
         text = open(src).read()
@@ -994,7 +1070,7 @@ def copy_operational_layer(out: str) -> None:
     for sid in STIMULI:
         src = os.path.join(TEMPLATE, "stimuli", sid, "STIMULUS.md")
         _w(os.path.join(out, "stimuli", sid, "STIMULUS.md"), open(src).read())
-    for sid, body in NEW_STIMULI.items():
+    for sid, body in new_stimuli(shift).items():
         _w(os.path.join(out, "stimuli", sid, "STIMULUS.md"), body)
     for name in HARNESS_MEMORY:
         src = os.path.join(TEMPLATE, "memory", "harness", name)
@@ -1013,10 +1089,23 @@ def main() -> None:
                     help="copy a plain-text SKILL.md skill dir into the soul's skills/ (repeatable)")
     ap.add_argument("--engine", default=ENGINE,
                     help="engine dir for config paths (default: this checkout; use /app for the container image)")
+    ap.add_argument("--tz", default=None, metavar="ZONE",
+                    help="IANA timezone the duck lives in (e.g. Europe/London). With --awake this puts its "
+                         "cron duties on a human day. The engine's cron is UTC-only, so the conversion is "
+                         "done here at compose time — re-compose after a DST change to re-fix it.")
+    ap.add_argument("--awake", default="07:00-23:00", metavar="HH:MM-HH:MM",
+                    help="local waking window, default 07:00-23:00 (a 16/8 day). Only used with --tz.")
+    ap.add_argument("--heartbeats", type=int, default=3, metavar="N",
+                    help="self-initiative wakes inside the waking window (default 3). Only used with --tz.")
     ap.add_argument("--tg-handle", default=None,
                     help="the looper's telegram bot username for group @-mention triggers (default looper_<id>_bot)")
     args = ap.parse_args()
     tid = args.token_id
+
+    shift = None
+    if args.tz:
+        wake, sleep = args.awake.split("-")
+        shift = human_shift(args.tz, wake.strip(), sleep.strip(), args.heartbeats, tid)
 
     if args.codex and args.meta:
         meta = json.load(open(args.meta))
@@ -1046,9 +1135,9 @@ def main() -> None:
     os.makedirs(out, exist_ok=True)
 
     # persona layer (generated)
-    _w(os.path.join(out, "SOUL.md"), render_soul_md(meta, codex, tid))
+    _w(os.path.join(out, "SOUL.md"), render_soul_md(meta, codex, tid, shift))
     _w(os.path.join(out, "memory", "INDEX.md"), render_index_md(tid))
-    _w(os.path.join(out, "memory", "soul", "SOUL.md"), render_soul_md(meta, codex, tid))
+    _w(os.path.join(out, "memory", "soul", "SOUL.md"), render_soul_md(meta, codex, tid, shift))
     _w(os.path.join(out, "memory", "soul", "voice.md"), render_voice_md(codex))
     _w(os.path.join(out, "memory", "soul", "character.md"), render_character_md(meta, codex, tid))
     _w(os.path.join(out, "memory", "soul", "boundaries.md"), render_boundaries_md(codex))
@@ -1071,7 +1160,7 @@ def main() -> None:
     _w(os.path.join(out, "prompts", "heartbeat", "express.md"), render_heartbeat_express())
     _w(os.path.join(out, "skills", "buzz", "SKILL.md"), render_buzz_skill_md())
     # operational layer (copied + trimmed) — after, so it can't clobber the generated prompts
-    copy_operational_layer(out)
+    copy_operational_layer(out, shift)
     # Group IDENTITY: the copied telegram/perceive uses the DACK template's "duck"/"dack" triggers + a
     # gitlawb/DAC "turf" — none of which is this looper, so it never recognizes being addressed. Rewrite the
     # group-guest triggers to THIS looper's name / #id / @handle and a looper-appropriate turf.
@@ -1213,7 +1302,7 @@ def main() -> None:
             shutil.copytree(src, os.path.join(out, "skills", name), dirs_exist_ok=True)
             print(f"  + skill: {name}")
     # config + readme
-    _w(os.path.join(out, "dack.config.example.yaml"), render_config(tid, engine=args.engine, bash_skills=args.bash_skills))
+    _w(os.path.join(out, "dack.config.example.yaml"), render_config(tid, engine=args.engine, bash_skills=args.bash_skills, shift=shift))
     # Ideal layout: this bundle deploys to /duck/dack-soul and is PURE soul — runtime/secrets/config AND the
     # buzz CLI binary all live OUTSIDE it at the /duck root, so the soul repo ignores only `runlogs/`
     # (written just below). The buzz capability ships here only as a prose SKILL.md; the openclaude
@@ -1229,6 +1318,12 @@ def main() -> None:
     n = sum(len(files) for _, _, files in os.walk(out))
     print(f"composed {out}  ({n} files)")
     print(f"  {codex.get('agent_class')} · {codex.get('specialization')} · voice: {codex.get('personality', {}).get('voice')}")
+    if shift:
+        print(f"  day: awake {shift['wake']}-{shift['sleep']} {shift['tz']} ({shift['offset']}), "
+              f"{shift['awake_hours']}h up / {shift['asleep_hours']}h down")
+        print(f"    heartbeats  {', '.join(shift['heartbeat_local'])} local   -> cron(UTC) {shift['heartbeat_cron']}")
+        print(f"    digest      {shift['digest_local']} local            -> cron(UTC) {shift['digest_cron']}")
+        print(f"    reflect     {shift['reflect_local']} local (asleep)   -> cron(UTC) {shift['reflect_cron']}")
 
 
 if __name__ == "__main__":
