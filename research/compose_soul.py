@@ -1022,10 +1022,13 @@ def main() -> None:
         meta = json.load(open(args.meta))
         codex = json.load(open(args.codex))
     else:
-        key = os.environ.get("ALCHEMY_KEY")
-        if not key:
-            raise SystemExit("set ALCHEMY_KEY (or pass --codex/--meta)")
-        rpc = lf.RPC.format(key=key)
+        if lf.RPC_URL:
+            rpc = lf.RPC_URL            # any Base-mainnet JSON-RPC; no Alchemy account needed
+        else:
+            key = os.environ.get("ALCHEMY_KEY")
+            if not key:
+                raise SystemExit("set ALCHEMY_KEY or RPC_URL (or pass --codex/--meta)")
+            rpc = lf.RPC.format(key=key)
         meta = lf._get_json(lf.token_uri(rpc, tid))
         codex = lf._get_json(lf.ar_to_https(meta["codex_uri"]))
 

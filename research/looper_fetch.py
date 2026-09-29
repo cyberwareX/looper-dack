@@ -20,13 +20,21 @@ import urllib.request
 
 CONTRACT = "0x1649CD37f4748807b4882FC48765bA0B2aFfa94a"  # Loopers, Base mainnet
 RPC = "https://base-mainnet.g.alchemy.com/v2/{key}"
+# Any Base-mainnet JSON-RPC works; `RPC_URL` overrides the Alchemy default so you can read a codex
+# with no account at all (e.g. RPC_URL=https://mainnet.base.org).
+RPC_URL = os.environ.get("RPC_URL")
+# Public RPC gateways and the Arweave gateway sit behind bot protection that 403s urllib's default
+# `Python-urllib/3.x` agent. Send a normal browser UA.
+UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+      "(KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36")
 TOKEN_URI_SELECTOR = "0xc87b56dd"  # tokenURI(uint256)
 OUT_DIR = os.path.join(os.path.dirname(__file__), "metadata")
 
 
 def _post(url: str, payload: dict) -> dict:
     req = urllib.request.Request(
-        url, data=json.dumps(payload).encode(), headers={"content-type": "application/json"}
+        url, data=json.dumps(payload).encode(),
+        headers={"content-type": "application/json", "user-agent": UA}
     )
     with urllib.request.urlopen(req, timeout=30) as r:
         return json.load(r)
@@ -34,7 +42,7 @@ def _post(url: str, payload: dict) -> dict:
 
 def _get_json(url: str) -> dict:
     # arweave.net 302-redirects to a content-addressed subdomain; urllib follows redirects.
-    req = urllib.request.Request(url, headers={"accept": "application/json"})
+    req = urllib.request.Request(url, headers={"accept": "application/json", "user-agent": UA})
     with urllib.request.urlopen(req, timeout=30) as r:
         return json.load(r)
 
@@ -92,10 +100,13 @@ def main() -> None:
     if not args:
         sys.exit("usage: ALCHEMY_KEY=<key> ./looper_fetch.py <token_id> [--summary-only]")
     token_id = int(args[0])
-    key = os.environ.get("ALCHEMY_KEY")
-    if not key:
-        sys.exit("set ALCHEMY_KEY in the env")
-    rpc = RPC.format(key=key)
+    if RPC_URL:
+        rpc = RPC_URL
+    else:
+        key = os.environ.get("ALCHEMY_KEY")
+        if not key:
+            sys.exit("set ALCHEMY_KEY, or RPC_URL for any Base-mainnet JSON-RPC endpoint")
+        rpc = RPC.format(key=key)
 
     uri = token_uri(rpc, token_id)
     meta = _get_json(uri)
