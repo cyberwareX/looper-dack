@@ -298,7 +298,7 @@ webhooks:
   "/telegram/trusted": org        # the Loopers group (map its chat_id in the ingress config)
   "/telegram/pub":     public     # strangers / other groups / DMs
   "/buzz/org":         org        # the org channel (the fleet + Hermes workers)
-  "/buzz/public":      public     # open Buzz channels / strangers (ingress POSTs to /buzz/&lt;trust&gt;)
+  "/buzz/public":      public     # open Buzz channels / strangers (ingress POSTs to /buzz/<trust>)
 
 mcp_servers:
   - name: recall                                  # verbatim short-term memory (taints public)
@@ -1212,10 +1212,16 @@ def main() -> None:
     # config + readme
     _w(os.path.join(out, "dack.config.example.yaml"), render_config(tid, engine=args.engine, bash_skills=args.bash_skills))
     # Ideal layout: this bundle deploys to /duck/dack-soul and is PURE soul — runtime/secrets/config AND the
-    # buzz CLI binary all live OUTSIDE it at the /duck root, so the soul repo needs NO gitignore at all
-    # (fully tripwire-protected). The buzz capability ships here only as a prose SKILL.md; the openclaude
+    # buzz CLI binary all live OUTSIDE it at the /duck root, so the soul repo ignores only `runlogs/`
+    # (written just below). The buzz capability ships here only as a prose SKILL.md; the openclaude
     # runtime drives it via the `buzz-cli` MCP over `/duck/bin/buzz` (the operator drops the binary there).
     _w(os.path.join(out, "README.md"), render_readme(meta, codex, tid))
+    # The ONE thing the soul repo must ignore: `runlogs/`. The engine keeps per-cycle runlogs (chat
+    # detail + handles) in their OWN private git repo at `<soul>/runlogs/`, and hard-fails at boot
+    # ("`runlogs/` must be gitignored in <soul>/.gitignore") if the soul does not ignore them —
+    # otherwise the soul-integrity tripwire would commit/revert them every cycle. Everything else
+    # (config, secrets, identities, databases) already lives OUTSIDE the soul at the /duck root.
+    _w(os.path.join(out, ".gitignore"), "runlogs/")
 
     n = sum(len(files) for _, _, files in os.walk(out))
     print(f"composed {out}  ({n} files)")

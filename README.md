@@ -1,4 +1,4 @@
-# looper-duck
+# looper-dack
 
 Tools for turning a **Looper** NFT (Base mainnet, `0x1649CD37f4748807b4882FC48765bA0B2aFfa94a`)
 into a running **[dack](https://github.com/obraztsov/dack-engine) duck** — an autonomous agent whose
