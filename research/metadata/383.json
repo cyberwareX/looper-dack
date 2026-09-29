@@ -1,0 +1,87 @@
+{
+  "name": "Looper #383",
+  "description": "A Looper agent seed generated from the approved HashLips layer-composite pipeline.",
+  "image": "ar://s07l96DPo-RAgAinKDj1zcCR9lPjB2qT_fNLbH4XChg",
+  "external_url": "https://helixa.xyz/multipass/loopers/383",
+  "attributes": [
+    {
+      "trait_type": "Background",
+      "value": "Agent Palm Terminal"
+    },
+    {
+      "trait_type": "Outfit",
+      "value": "Base Patch Hoodie Black"
+    },
+    {
+      "trait_type": "Skin",
+      "value": "Holo"
+    },
+    {
+      "trait_type": "Eyes",
+      "value": "Human Blue"
+    },
+    {
+      "trait_type": "Mouth",
+      "value": "Red Pill Tongue Mouth"
+    },
+    {
+      "trait_type": "Head Layer",
+      "value": "Pure Electric Plasma Cornrows"
+    },
+    {
+      "trait_type": "Eyewear",
+      "value": "None"
+    },
+    {
+      "trait_type": "Held Object",
+      "value": "None"
+    },
+    {
+      "trait_type": "Foreground Scraps",
+      "value": "None"
+    },
+    {
+      "trait_type": "Artifact",
+      "value": "None"
+    },
+    {
+      "trait_type": "Overlay",
+      "value": "None"
+    },
+    {
+      "trait_type": "Agent Class",
+      "value": "CEO / Operator"
+    },
+    {
+      "trait_type": "Secondary Class",
+      "value": "Mercenary / Fixer"
+    },
+    {
+      "trait_type": "Specialization",
+      "value": "tool routing"
+    },
+    {
+      "trait_type": "Risk",
+      "value": "Disciplined"
+    },
+    {
+      "trait_type": "Autonomy",
+      "value": "Extreme"
+    },
+    {
+      "trait_type": "Codex Version",
+      "value": "looper-trait-personality-matrix-v02"
+    }
+  ],
+  "agent_class": "CEO / Operator",
+  "secondary_class": "Mercenary / Fixer",
+  "voice": "conspiracy energy converted into due diligence",
+  "risk_profile": "Disciplined",
+  "specialization": "tool routing",
+  "activation_seed": "4201d561cd519473eed6b273908a343d",
+  "first_mission": "build an operating memo",
+  "cred_evolution_hint": "Cred powers Looper Evolution after mint.",
+  "trait_codex_version": "looper-trait-personality-matrix-v02",
+  "codex_uri": "ar://wC0L6LR_IGsS_SgAQFrSbnzsjVgAbOlwZcV_lbrp_v8/383.json",
+  "compiler": "HashLips Art Engine + Helixa Loopers metadata compiler"
+}

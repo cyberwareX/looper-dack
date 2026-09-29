@@ -1,0 +1,42 @@
+# ── Secrets & environment ─────────────────────────────────────────────────────
+.env
+*.key
+*.token
+**/secrets/
+**/identities/
+
+# ── Composed souls (generated OUTPUT) — NEVER commit ──────────────────────────
+# `compose_soul.py` writes souls/looper-<id>/, which holds a duck's live identity keys,
+# filled config (real chat ids / endpoints / DIDs), and runlog databases (private
+# conversations). This is per-operator runtime state, not shareable template material.
+souls/
+
+# Runtime state, wherever it lands
+**/dack.config.yaml
+**/*.sqlite
+**/*.sqlite-*
+**/media/
+**/dack.health.json
+**/*-ingress.config.json
+**/*-ingress.cursor
+
+# ── Fetched images (metadata JSON is committed as examples; images are not) ───
+research/metadata/*.png
+research/metadata/*.jpg
+research/metadata/*.img
+
+# ── Third-party content — referenced upstream, not re-hosted here ─────────────
+# The Bankr skill (github.com/BankrBot/skills), the Helixa skill doc (helixa.xyz), and
+# the Quigley "Loopers" thesis article are third-party. Clone/read them from source and
+# point `compose_soul.py --skill` at your local copy; we don't redistribute them here.
+research/bankr-ref/
+research/skills-src/
+research/helixa-skill.md
+research/loopers-thesis-quigley.txt
+
+# ── Internal / operator-specific (has live infra details) ─────────────────────
+research/P4-bankr-e2e-runbook.md
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
